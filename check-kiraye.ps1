@@ -10,8 +10,6 @@ if (-not $botToken -or -not $chatId) {
     throw "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env variables are not set"
 }
 
-$metros = @('20 Yanvar', 'Memar Əcəmi', 'Nizami', 'Elmlər Akademiyası', 'İnşaatçılar', 'Nəriman Nərimanov', 'N.Nərimanov', 'Gənclik')
-
 function Write-Log($msg) {
     Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg"
 }
@@ -29,7 +27,6 @@ function Send-Telegram([string]$text) {
 
 # ---- load state ----
 $binaSeenList = New-Object System.Collections.Generic.List[string]
-$tapSeenList = New-Object System.Collections.Generic.List[string]
 $firstRun = $true
 
 if (Test-Path $stateFile) {
@@ -37,14 +34,12 @@ if (Test-Path $stateFile) {
     try {
         $state = Get-Content -Raw -Path $stateFile -Encoding UTF8 | ConvertFrom-Json
         if ($state.bina) { $binaSeenList.AddRange([string[]]$state.bina) }
-        if ($state.tap) { $tapSeenList.AddRange([string[]]$state.tap) }
     } catch {
         Write-Log "State load error, starting fresh: $_"
         $firstRun = $true
     }
 }
 $binaSeenSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$binaSeenList)
-$tapSeenSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$tapSeenList)
 
 $newMessages = New-Object System.Collections.Generic.List[string]
 
@@ -69,47 +64,10 @@ try {
     Write-Log "bina.az fetch error: $_"
 }
 
-# ---- tap.az ----
-$tapUrl = 'https://tap.az/elanlar/dasinmaz-emlak/menziller?categoryId=Z2lkOi8vdGFwL0NhdGVnb3J5LzYzNQ&q%5Bis_shop%5D=&q%5Bregion_id%5D=420&order=date_desc&keywords_source=typewritten&q%5Bprice%5D%5B%5D=&q%5Bprice%5D%5B%5D=550&p%5B740%5D=3724&p%5B736%5D%5B%5D=2&p%5B736%5D%5B%5D=2'
-
-try {
-    $resp = Invoke-WebRequest -Uri $tapUrl -UseBasicParsing -Headers @{ 'User-Agent' = 'Mozilla/5.0' }
-    $html = $resp.Content
-    $m = [regex]::Match($html, '<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', [System.Text.RegularExpressions.RegexOptions]::Singleline)
-    if ($m.Success) {
-        $json = $m.Groups[1].Value | ConvertFrom-Json
-        $apollo = $json.props.pageProps.apolloState
-        $adKeys = $apollo.PSObject.Properties.Name | Where-Object { $_ -match '^Ad:' }
-        $ads = foreach ($k in $adKeys) { $apollo.$k }
-        $ads = $ads | Sort-Object { [datetime]$_.updatedAt } -Descending
-        Write-Log "tap.az: fetched $($ads.Count) ads"
-        foreach ($ad in $ads) {
-            $title = $ad.title
-            $matched = $false
-            foreach ($metro in $metros) {
-                if ($title -match [regex]::Escape($metro)) { $matched = $true; break }
-            }
-            if ($matched) {
-                $id = "tap-$($ad.legacyResourceId)"
-                if (-not $tapSeenSet.Contains($id)) {
-                    $tapSeenSet.Add($id) | Out-Null
-                    $tapSeenList.Add($id)
-                    $text = "Yeni kiraye elani (tap.az)`n$($ad.price) AZN/ay`n$title`nhttps://tap.az$($ad.path)"
-                    $newMessages.Add($text)
-                }
-            }
-        }
-    } else {
-        Write-Log "tap.az: __NEXT_DATA__ not found"
-    }
-} catch {
-    Write-Log "tap.az fetch error: $_"
-}
-
 # ---- notify ----
 if ($firstRun) {
-    Send-Telegram "Bot aktivlesdi (GitHub Actions). $($binaSeenList.Count + $tapSeenList.Count) movcud elan qeyde alindi. Bundan sonra yalniz yeni elanlar barede bildiris gonderilecek."
-    Write-Log "First run: recorded $($binaSeenList.Count + $tapSeenList.Count) baseline ids, no notifications sent"
+    Send-Telegram "Bot aktivlesdi (GitHub Actions). $($binaSeenList.Count) movcud elan qeyde alindi. Bundan sonra yalniz yeni elanlar barede bildiris gonderilecek."
+    Write-Log "First run: recorded $($binaSeenList.Count) baseline ids, no notifications sent"
 } else {
     foreach ($msg in $newMessages) {
         Send-Telegram $msg
@@ -121,9 +79,8 @@ if ($firstRun) {
 # ---- trim & save state ----
 $maxKeep = 1500
 if ($binaSeenList.Count -gt $maxKeep) { $binaSeenList.RemoveRange(0, $binaSeenList.Count - $maxKeep) }
-if ($tapSeenList.Count -gt $maxKeep) { $tapSeenList.RemoveRange(0, $tapSeenList.Count - $maxKeep) }
 
-$stateOut = @{ bina = @($binaSeenList); tap = @($tapSeenList) }
+$stateOut = @{ bina = @($binaSeenList) }
 $stateOut | ConvertTo-Json -Depth 3 | Set-Content -Path $stateFile -Encoding UTF8
 
-Write-Output "Done. New: $($newMessages.Count). Bina seen: $($binaSeenList.Count). Tap seen: $($tapSeenList.Count)."
+Write-Output "Done. New: $($newMessages.Count). Bina seen: $($binaSeenList.Count)."
