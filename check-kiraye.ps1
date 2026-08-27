@@ -5,8 +5,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateFile = Join-Path $scriptDir 'seen.json'
 
 $botToken = $env:TELEGRAM_BOT_TOKEN
-$chatId = $env:TELEGRAM_CHAT_ID
-if (-not $botToken -or -not $chatId) {
+$chatIds = @($env:TELEGRAM_CHAT_ID, $env:TELEGRAM_CHAT_ID_2) | Where-Object { $_ }
+if (-not $botToken -or $chatIds.Count -eq 0) {
     throw "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env variables are not set"
 }
 
@@ -16,12 +16,14 @@ function Write-Log($msg) {
 
 function Send-Telegram([string]$text) {
     $uri = "https://api.telegram.org/bot$botToken/sendMessage"
-    $payload = @{ chat_id = $chatId; text = $text; disable_web_page_preview = $true } | ConvertTo-Json -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
-    try {
-        Invoke-RestMethod -Uri $uri -Method Post -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
-    } catch {
-        Write-Log "Telegram send error: $_"
+    foreach ($cid in $chatIds) {
+        $payload = @{ chat_id = $cid; text = $text; disable_web_page_preview = $true } | ConvertTo-Json -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        try {
+            Invoke-RestMethod -Uri $uri -Method Post -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
+        } catch {
+            Write-Log "Telegram send error (chat $cid): $_"
+        }
     }
 }
 
