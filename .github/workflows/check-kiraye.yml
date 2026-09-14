@@ -8,10 +8,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: check-kiraye
-  cancel-in-progress: false
-
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -34,7 +30,16 @@ jobs:
           git add seen.json
           if ! git diff --cached --quiet; then
             git commit -m "Update seen listings state"
-            git push
+            for i in 1 2 3 4 5; do
+              if git push; then
+                echo "Pushed successfully"
+                exit 0
+              fi
+              echo "Push rejected, retrying ($i)..."
+              git fetch origin main
+              git rebase -X ours origin/main || { git rebase --abort; break; }
+              sleep $((RANDOM % 5 + 1))
+            done
           else
             echo "No state changes"
           fi
