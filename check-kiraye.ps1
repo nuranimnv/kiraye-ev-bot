@@ -30,8 +30,10 @@ function Send-Telegram([string]$text) {
 # ---- load state ----
 $binaSeenList = New-Object System.Collections.Generic.List[string]
 $ev10SeenList = New-Object System.Collections.Generic.List[string]
+$yeSeenList = New-Object System.Collections.Generic.List[string]
 $firstRun = $true
 $threeRoomInit = $false
+$yeInit = $false
 
 if (Test-Path $stateFile) {
     $firstRun = $false
@@ -40,6 +42,8 @@ if (Test-Path $stateFile) {
         if ($state.bina) { $binaSeenList.AddRange([string[]]$state.bina) }
         if ($state.ev10) { $ev10SeenList.AddRange([string[]]$state.ev10) }
         if ($state.threeRoomInit) { $threeRoomInit = $true }
+        if ($state.ye) { $yeSeenList.AddRange([string[]]$state.ye) }
+        if ($state.yeInit) { $yeInit = $true }
     } catch {
         Write-Log "State load error, starting fresh: $_"
         $firstRun = $true
@@ -47,6 +51,7 @@ if (Test-Path $stateFile) {
 }
 $binaSeenSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$binaSeenList)
 $ev10SeenSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$ev10SeenList)
+$yeSeenSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$yeSeenList)
 
 $newMessages = New-Object System.Collections.Generic.List[string]
 
@@ -110,6 +115,56 @@ function Invoke-Ev10Search([string]$url, [string]$label, [bool]$silent) {
 Invoke-Ev10Search ($ev10Base + '&max_price=550&min_rooms=2&max_rooms=2') '2 otaq' $false
 Invoke-Ev10Search ($ev10Base + '&min_price=590&max_price=660&min_area=55&min_rooms=3&max_rooms=3') '3 otaq' (-not $threeRoomInit)
 
+# ---- yeniemlak.az ---- (server-side filters are unreliable, so metro/price/area are filtered here)
+function ConvertTo-Folded([string]$s) {
+    $s = $s.ToLowerInvariant().Replace([string][char]0x0259, 'e').Replace([string][char]0x0131, 'i')
+    return ($s.Normalize([Text.NormalizationForm]::FormD) -replace '\p{M}', '').Trim()
+}
+$yeMetros = @('20 Yanvar', 'Memar Əcəmi', 'Nizami', 'Elmlər Akademiyası', 'İnşaatçılar', 'Nəriman Nərimanov', 'Gənclik', 'Nəsimi') | ForEach-Object { ConvertTo-Folded $_ }
+
+function Invoke-YeniemlakSearch([int]$rooms, [double]$minPrice, [double]$maxPrice, [double]$minArea, [bool]$silent) {
+    $label = "$rooms otaq"
+    try {
+        $url = "https://yeniemlak.az/elan/axtar?emlak=1&elan_nov=2&seher%5B%5D=7&otaq=$rooms&otaq2=$rooms"
+        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -Headers @{ 'User-Agent' = 'Mozilla/5.0' }
+        $bytes = if ($resp.RawContentStream) { $resp.RawContentStream.ToArray() } else { [Text.Encoding]::GetEncoding(28591).GetBytes($resp.Content) }
+        $html = [Text.Encoding]::UTF8.GetString($bytes)
+        $blocks = @($html -split '<table class="list"' | Select-Object -Skip 1)
+        Write-Log "yeniemlak.az ($label): fetched $($blocks.Count) cards"
+        foreach ($t in $blocks) {
+            $idM = [regex]::Match($t, 'Elan: <g><b>(\d+)</b>')
+            $priceM = [regex]::Match($t, '<price>\s*([\d.,\s]+?)\s*</price>')
+            $areaM = [regex]::Match($t, '<b>([\d.,]+)</b> m2')
+            $metroM = [regex]::Match($t, 'metro\. <b>([^<]+)</b>')
+            $hrefM = [regex]::Match($t, 'href="(/elan/[^"]+)"')
+            if (-not ($idM.Success -and $priceM.Success -and $hrefM.Success)) { continue }
+            $price = [double](($priceM.Groups[1].Value -replace '[^\d.]', ''))
+            $area = if ($areaM.Success) { [double](($areaM.Groups[1].Value -replace ',', '.')) } else { 0 }
+            $metro = if ($metroM.Success) { $metroM.Groups[1].Value.Trim() } else { '' }
+            if (-not $metro) { continue }
+            if ($yeMetros -notcontains (ConvertTo-Folded $metro)) { continue }
+            if ($price -lt $minPrice -or $price -gt $maxPrice) { continue }
+            if ($area -lt $minArea) { continue }
+            $id = "ye-$($idM.Groups[1].Value)"
+            if (-not $yeSeenSet.Contains($id)) {
+                $yeSeenSet.Add($id) | Out-Null
+                $yeSeenList.Add($id)
+                if (-not $silent) {
+                    $floorM = [regex]::Match($t, '<b>(\d+)</b> / <b>(\d+)</b>')
+                    $floor = if ($floorM.Success) { "$($floorM.Groups[1].Value)/$($floorM.Groups[2].Value) mertebe" } else { '' }
+                    $text = "Yeni kiraye elani (yeniemlak.az)`n$price AZN/ay`n$rooms otaqli, $area m2, $floor`n$metro`nhttps://yeniemlak.az$($hrefM.Groups[1].Value)"
+                    $newMessages.Add($text)
+                }
+            }
+        }
+    } catch {
+        Write-Log "yeniemlak.az ($label) fetch error: $_"
+    }
+}
+
+Invoke-YeniemlakSearch 2 0 550 0 (-not $yeInit)
+Invoke-YeniemlakSearch 3 590 660 55 (-not $yeInit)
+
 # ---- notify ----
 if ($firstRun) {
     Send-Telegram "Bot aktivlesdi (GitHub Actions). $($binaSeenList.Count + $ev10SeenList.Count) movcud elan qeyde alindi. Bundan sonra yalniz yeni elanlar barede bildiris gonderilecek."
@@ -127,7 +182,9 @@ $maxKeep = 1500
 if ($binaSeenList.Count -gt $maxKeep) { $binaSeenList.RemoveRange(0, $binaSeenList.Count - $maxKeep) }
 if ($ev10SeenList.Count -gt $maxKeep) { $ev10SeenList.RemoveRange(0, $ev10SeenList.Count - $maxKeep) }
 
-$stateOut = @{ bina = @($binaSeenList); ev10 = @($ev10SeenList); threeRoomInit = $true }
+if ($yeSeenList.Count -gt $maxKeep) { $yeSeenList.RemoveRange(0, $yeSeenList.Count - $maxKeep) }
+
+$stateOut = @{ bina = @($binaSeenList); ev10 = @($ev10SeenList); ye = @($yeSeenList); threeRoomInit = $true; yeInit = $true }
 $stateOut | ConvertTo-Json -Depth 3 | Set-Content -Path $stateFile -Encoding UTF8
 
 Write-Output "Done. New: $($newMessages.Count). Bina seen: $($binaSeenList.Count). Ev10 seen: $($ev10SeenList.Count)."
