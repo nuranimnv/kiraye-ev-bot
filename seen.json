@@ -1,5 +1,4 @@
 {
-  "threeRoomInit": true,
   "ye": [
     "ye-242963",
     "ye-243010",
@@ -8,7 +7,6 @@
     "ye-243461",
     "ye-243499"
   ],
-  "yeInit": true,
   "ev10": [
     "ev10-329010",
     "ev10-328946",
@@ -184,6 +182,8 @@
     "ev10-338105",
     "ev10-338097"
   ],
+  "yeInit": true,
+  "threeRoomInit": true,
   "bina": [
     "bina-6396671",
     "bina-6412286",
