@@ -1519,8 +1519,6 @@
     "ev10-338097",
     "ev10-338232"
   ],
-  "yeInit": true,
-  "threeRoomInit": true,
   "ye": [
     "ye-242963",
     "ye-243010",
@@ -1529,5 +1527,7 @@
     "ye-243461",
     "ye-243499",
     "ye-243557"
-  ]
+  ],
+  "yeInit": true,
+  "threeRoomInit": true
 }
