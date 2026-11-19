@@ -178,7 +178,7 @@
     "ev10-338438",
     "ev10-338466"
   ],
-  "yeInit": true,
+  "threeRoomInit": true,
   "ye": [
     "ye-242963",
     "ye-243010",
@@ -189,6 +189,7 @@
     "ye-243557",
     "ye-243960"
   ],
+  "yeInit": true,
   "bina": [
     "bina-6396671",
     "bina-6412286",
@@ -1542,6 +1543,5 @@
     "bina-6639135",
     "bina-6639115",
     "bina-6639163"
-  ],
-  "threeRoomInit": true
+  ]
 }
