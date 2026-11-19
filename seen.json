@@ -1,5 +1,4 @@
 {
-  "threeRoomInit": true,
   "ev10": [
     "ev10-329010",
     "ev10-328946",
@@ -1552,5 +1551,6 @@
     "ye-244144",
     "ye-244386"
   ],
+  "threeRoomInit": true,
   "yeInit": true
 }
